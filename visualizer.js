@@ -25,17 +25,55 @@ const isVisibilitySupported = typeof document.hidden !== "undefined";
 window.sphereQueue = sphereQueue;
 
 // TX settings
-const RPC_URL = "https://rpc.soniclabs.com";
-const BLOCK_EXPLORER = "https://sonicscan.org/tx";
-const MIN_AMOUNT = 0.1; // Min Sonic
-const MAX_AMOUNT = 100000; // Max Sonic
-const TPS_WINDOW = 30000; // 30 seconds
+const SONIC_RPC = "https://rpc.blaze.soniclabs.com";
+const MONAD_RPC = "https://rpc.monad.xyz";
+const BLOCK_EXPLORER_SONIC = "https://sonicscan.org/tx";
+const BLOCK_EXPLORER_MONAD = "https://monadscan.com/tx";
+
+// Network configuration - easily extensible for more networks
+const NETWORKS = [
+  {
+    id: 'sonic',
+    name: 'SONIC',
+    rpc: SONIC_RPC,
+    explorer: BLOCK_EXPLORER_SONIC,
+    ticker: 'S'
+  },
+  {
+    id: 'monad',
+    name: 'MONAD',
+    rpc: MONAD_RPC,
+    explorer: BLOCK_EXPLORER_MONAD,
+    ticker: 'MON'
+  }
+];
+
+// Network state (default to Sonic, or load from localStorage)
+const savedNetwork = localStorage.getItem('network');
+let currentNetworkId = savedNetwork === null || savedNetwork === 'sonic' ? 'sonic' : savedNetwork;
+let currentNetwork = NETWORKS.find(n => n.id === currentNetworkId) || NETWORKS[0]; // Default to first network
+let RPC_URL = currentNetwork.rpc;
+let BLOCK_EXPLORER = currentNetwork.explorer;
+
+// Get ticker symbol based on current network
+function getTicker() {
+  return currentNetwork.ticker;
+}
+
+// Get size multiplier for maximum sphere size based on current network
+function getSizeMultiplier() {
+  return currentNetworkId === 'monad' ? 1.0 : 1.0;
+}
+
+const MIN_AMOUNT = 0.1; // Min amount
+const MAX_AMOUNT = 100000; // Max amount
+const TPS_WINDOW = 5000; // 30 seconds
 
 // Sphere settings
 const MAX_SPHERES = 1000; // Max displayed spheres
 const MAX_QUEUE_SIZE = 50000; // Max queue size
 const MIN_SPHERE_SIZE = 0.4;
-const MAX_SPHERE_SIZE = 10;
+const MAX_SPHERE_SIZE = 5;
 const MIN_SPHERE_SEGMENTS = 10; // Resolution
 const MAX_SPHERE_SEGMENTS = 40; // Resolution
 const BOUNCE_RESTITUTION = 0.4;
@@ -222,7 +260,7 @@ function onMouseMove(event) {
       const sphereIndex = spheres.indexOf(hit);
       if (sphereIndex !== -1 && sphereData[sphereIndex]) {
         const amount = sphereData[sphereIndex].amount;
-        tooltipDiv.textContent = `${amount.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: amount > 1 ? 0 : 8})} S`;
+        tooltipDiv.textContent = `${amount.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: amount > 1 ? 0 : 8})} ${getTicker()}`;
         tooltipDiv.style.display = 'block';
         tooltipDiv.style.left = `${event.clientX + 15}px`;
         tooltipDiv.style.top = `${event.clientY + 15}px`;
@@ -344,7 +382,7 @@ function calculateTPS() {
   // Remove transactions older than 30 seconds
   transactionTimes = transactionTimes.filter(time => now - time < TPS_WINDOW);
   // Calculate TPS based on remaining transactions
-  return (transactionTimes.length / 30).toFixed(2);
+  return (transactionTimes.length / 5).toFixed(2);
 }
 
 // Navigate to transaction
@@ -411,7 +449,7 @@ function createMainStatsTexture() {
     const xAdjustment = 6;
     const yAdjustment = canvas.height / 35;
     ctx.fillStyle = 'rgba(255, 255, 255, 1)';
-    ctx.fillText(`Volume: ${totalSent.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 4})} S`, canvas.width/2 + xAdjustment, canvas.height/4 - yAdjustment);
+    ctx.fillText(`Vol: ${totalSent.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 4})} ${getTicker()}`, canvas.width/2 + xAdjustment, canvas.height/4 - yAdjustment);
     ctx.fillText(`Balls/Queue: ${ballCount}/${currentQueueCount}`, canvas.width/2 + xAdjustment, canvas.height / 2 - yAdjustment);
     ctx.fillText(`TPS: ${tps}`, canvas.width/2 + xAdjustment, canvas.height * 3/4 - yAdjustment);
     
@@ -501,7 +539,7 @@ function createSelectedTxTexture() {
     ctx.fillText('Selected', canvas.width/2 + xAdjustment, canvas.height/3);
     
     if (selectedSphere) {
-      const amount = `${selectedSphere.amount.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: selectedSphere.amount > 1 ? 0 : 8})} S`;
+      const amount = `${selectedSphere.amount.toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: selectedSphere.amount > 1 ? 0 : 8})} ${getTicker()}`;
       
       ctx.font = '24px Arial';
       ctx.fillStyle = window.isStatsHovered ? '#66d9ff' : '#4A9EFF';
@@ -511,7 +549,10 @@ function createSelectedTxTexture() {
       const iconSize = 24;
       ctx.drawImage(iconImage, canvas.width - 30 - iconSize/2, 30 - iconSize/2, iconSize, iconSize);
       
-      hitTestPlane.position.set(1.2, 0.8, -223.8);
+      // Adjust hit test plane position for mobile
+      const isMobile = window.innerWidth < 1000;
+      const hitTestY = isMobile ? -14.2 : 0.8;
+      hitTestPlane.position.set(1.2, hitTestY, -223.8);
       hitTestPlane.scale.set(44, 17, 1);
     } else {
       ctx.font = '20px Arial';
@@ -549,8 +590,13 @@ function createStatsDisplay() {
     roughness: 0.5
   });
 
+  // Adjust positions for mobile devices
+  const isMobile = window.innerWidth < 1000;
+  const mainStatsY = isMobile ? 15 : 30; // Lower on mobile
+  const selectedTxY = isMobile ? -16 : -1; // Lower on mobile
+  
   const mainStatsPlane = new THREE.Mesh(mainGeometry, mainMaterial);
-  mainStatsPlane.position.set(0, 30, -224);
+  mainStatsPlane.position.set(0, mainStatsY, -224);
   mainStatsPlane.scale.set(2.05, 2.05, 2.05);
   scene.add(mainStatsPlane);
 
@@ -565,7 +611,7 @@ function createStatsDisplay() {
   });
 
   const selectedTxPlane = new THREE.Mesh(selectedGeometry, selectedMaterial);
-  selectedTxPlane.position.set(0, -1, -224);
+  selectedTxPlane.position.set(0, selectedTxY, -224);
   selectedTxPlane.scale.set(2.05, 2.05, 2.05);
   scene.add(selectedTxPlane);
 
@@ -595,12 +641,134 @@ function calculateTilt(sphereCount) {
   return Math.min(tiltProgress * MAX_TILT, MAX_TILT);
 }
 
+// Function to switch networks
+function switchNetwork(networkId) {
+  // Find the network by ID
+  const network = NETWORKS.find(n => n.id === networkId);
+  if (!network) {
+    console.error(`Network ${networkId} not found`);
+    return;
+  }
+  
+  // Update current network
+  currentNetworkId = networkId;
+  currentNetwork = network;
+  
+  // Update RPC and block explorer URLs
+  RPC_URL = network.rpc;
+  BLOCK_EXPLORER = network.explorer;
+  
+  // Save to localStorage
+  localStorage.setItem('network', networkId);
+  
+  // Clear processed blocks to start fresh
+  processedBlockHashes.clear();
+  
+  // Reset transaction tracking
+  transactionTimes.length = 0;
+  sonic_sent = 0;
+  
+  // Clear queue
+  sphereQueue.length = 0;
+  
+  // Update stats display with new ticker
+  if (window.updateStatsDisplay) {
+    window.updateStatsDisplay(sonic_sent, spheres.length, calculateTPS(), selectedSphereGlobal);
+  }
+  
+  // Restart polling with new network
+  if (stopPolling) {
+    stopPolling();
+  }
+  stopPolling = pollForNewBlocks();
+  
+  console.log(`Switched to ${network.name} network`);
+}
+
+function createNetworkToggle() {
+  const container = document.getElementById('toggle-container');
+  
+  // Create network toggle wrapper (above 0-txs toggle)
+  const networkToggleWrapper = document.createElement('div');
+  networkToggleWrapper.className = 'fixed top-3 left-4 opacity-70';
+  networkToggleWrapper.style.cssText = `
+    display: flex;
+    background: #4a5568;
+    border-radius: 8px;
+    padding: 6px;
+    gap: 0;
+  `;
+  
+  // Store references to network buttons for updating
+  const networkButtons = [];
+  
+  // Create a button for each network
+  NETWORKS.forEach((network, index) => {
+    const isSelected = network.id === currentNetworkId;
+    const networkButton = document.createElement('button');
+    networkButton.type = 'button';
+    networkButton.className = 'network-option';
+    networkButton.dataset.networkId = network.id;
+    
+    // Style the button based on selection state
+    networkButton.style.cssText = `
+      padding: 4px 8px;
+      border: none;
+      background: ${isSelected ? '#ffffff' : 'transparent'};
+      color: ${isSelected ? '#000000' : '#ffffff'};
+      font-weight: 600;
+      font-size: 14px;
+      cursor: pointer;
+      border-radius: 4px;
+      transition: all 0.2s ease;
+      text-transform: uppercase;
+      font-family: Arial, sans-serif;
+      white-space: nowrap;
+    `;
+    
+    networkButton.textContent = network.name;
+    
+    // Add click handler
+    networkButton.addEventListener('click', () => {
+      // Switch network
+      switchNetwork(network.id);
+      
+      // Update all buttons' appearance
+      networkButtons.forEach((btn, idx) => {
+        const btnNetwork = NETWORKS[idx];
+        const btnIsSelected = btnNetwork.id === currentNetworkId;
+        btn.style.background = btnIsSelected ? '#ffffff' : 'transparent';
+        btn.style.color = btnIsSelected ? '#000000' : '#ffffff';
+      });
+    });
+    
+    // Add separator line between buttons (except after last)
+    if (index < NETWORKS.length - 1) {
+      const separator = document.createElement('div');
+      separator.style.cssText = `
+        width: 1px;
+        background: #718096;
+        margin: 0 4px;
+        align-self: stretch;
+      `;
+      networkToggleWrapper.appendChild(networkButton);
+      networkToggleWrapper.appendChild(separator);
+    } else {
+      networkToggleWrapper.appendChild(networkButton);
+    }
+    
+    networkButtons.push(networkButton);
+  });
+  
+  container.appendChild(networkToggleWrapper);
+}
+
 function createToggleButton() {
   const container = document.getElementById('toggle-container');
  
-  // Create toggle wrapper
+  // Create toggle wrapper (below network toggle)
   const toggleWrapper = document.createElement('div');
-  toggleWrapper.className = 'fixed top-4 left-4 flex items-center gap-2 opacity-70';
+  toggleWrapper.className = 'fixed top-16 left-4 flex items-center gap-2 opacity-70';
  
   // Create the switch
   const toggleSwitch = document.createElement('label');
@@ -700,6 +868,9 @@ async function init() {
   // Create ground
   await createGround();
 
+  // Create network toggle (above 0-txs toggle)
+  createNetworkToggle();
+  
   // Create toggle button
   createToggleButton();
 
@@ -851,7 +1022,8 @@ function createSphere(amount, txHash) {
   const weightedSize = Math.pow(normalizedSize, 3);
   
   // Map to final size range (0.4 to 12.4)
-  const size = MIN_SPHERE_SIZE + (weightedSize * MAX_SPHERE_SIZE);
+  // Apply network-specific multiplier to max size only, keeping min size unchanged
+  const size = MIN_SPHERE_SIZE + (weightedSize * MAX_SPHERE_SIZE * getSizeMultiplier());
   
   // Rest of the createSphere function remains the same...
   // Dynamically less bouncy for large spheres
@@ -898,7 +1070,7 @@ function createSphere(amount, txHash) {
   // Calculate segments - scale between min and max segments
   const segmentSize = Math.round(MIN_SPHERE_SEGMENTS + (normalizedAmount * (MAX_SPHERE_SEGMENTS - MIN_SPHERE_SEGMENTS)));
   if (amount > 1) {
-    console.info(`${amount} S at ${txHash}`);
+    console.info(`${amount} ${getTicker()} at ${txHash}`);
   }
 
   // Set colors based on amount thresholds
